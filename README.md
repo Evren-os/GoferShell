@@ -1,6 +1,6 @@
 # GoferShell
 
-GoferShell is a collection of shell-agnostic Go utilities designed to enhance your terminal experience. Originally crafted for Arch Linux and its derivatives, these tools—covering package updates, speedy downloads, and a YouTube toolkit—are compiled to work seamlessly in any shell environment.
+GoferShell is a collection of shell-agnostic Go utilities designed to enhance your terminal experience. Originally crafted for Arch Linux and its derivatives, these tools - covering package updates, speedy downloads, and a YouTube toolkit - are compiled to work seamlessly in any shell environment.
 
 ## Overview
 
