@@ -1,14 +1,15 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+
 	"github.com/chzyer/readline"
 )
 
-// ANSI color codes for terminal output
 const (
 	blue   = "\033[34m"
 	yellow = "\033[33m"
@@ -16,14 +17,50 @@ const (
 	reset  = "\033[0m"
 )
 
+// Usage message
+func printHelp() {
+	fmt.Printf("%syt_batch%s: Effortless batch video downloading via ytmax.\n\n", yellow, reset)
+	fmt.Printf("%sUSAGE%s:\n", yellow, reset)
+	fmt.Printf("  %syt_batch%s [options]\n\n", blue, reset)
+	fmt.Printf("%sDESCRIPTION%s:\n", yellow, reset)
+	fmt.Printf("  yt_batch simplifies downloading multiple videos. It prompts for a\n")
+	fmt.Printf("  comma-separated list of URLs and processes each using 'ytmax'.\n\n")
+	fmt.Printf("%sOPTIONS%s:\n", yellow, reset)
+	fmt.Printf("  %s-d <directory>%s    Set the download destination directory.\n", blue, reset)
+	fmt.Printf("                      If not specified, videos are saved to the\n")
+	fmt.Printf("                      current working directory.\n")
+	fmt.Printf("  %s--help%s             Display this help message and exit.\n\n", blue, reset)
+	fmt.Printf("%sEXAMPLES%s:\n", yellow, reset)
+	fmt.Printf("  %syt_batch%s\n", blue, reset)
+	fmt.Printf("    (Prompts for URLs, downloads to current directory)\n\n")
+	fmt.Printf("  %syt_batch -d /mnt/media/new_videos%s\n", blue, reset)
+	fmt.Printf("    (Prompts for URLs, downloads to /mnt/media/new_videos)\n\n")
+	fmt.Printf("%sREQUIREMENTS%s:\n", yellow, reset)
+	fmt.Printf("  - 'ytmax' must be installed and accessible in your PATH.\n")
+}
+
 func main() {
-	// Verify ytmax executable exists in PATH
+	var downloadDir string
+	var showHelp bool
+
+	flag.StringVar(&downloadDir, "d", "", "Download destination directory.")
+	flag.BoolVar(&showHelp, "help", false, "Show help message.")
+
+	flag.Usage = printHelp
+
+	flag.Parse()
+
+	if showHelp {
+		printHelp()
+		os.Exit(0)
+	}
+
+	// Verify ytmax executable exists in PATH.
 	if _, err := exec.LookPath("ytmax"); err != nil {
 		fmt.Println(red + "Error: ytmax executable not found in PATH" + reset)
 		os.Exit(1)
 	}
 
-	// Initialize readline with a colored prompt
 	rl, err := readline.New(blue + "Enter video URLs (separated by commas). Press [ENTER] when done: " + reset)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error initializing readline:", err)
@@ -31,21 +68,22 @@ func main() {
 	}
 	defer rl.Close()
 
-	// Read the input line
 	urls, err := rl.Readline()
 	if err != nil {
+		if err.Error() == "Interrupt" || err.Error() == "EOF" {
+			fmt.Println(yellow + "\nInput cancelled. Exiting." + reset)
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, "Error reading input:", err)
 		os.Exit(1)
 	}
 
-	// Trim whitespace and check if input is empty
 	urls = strings.TrimSpace(urls)
 	if urls == "" {
 		fmt.Println(yellow + "No URLs entered. Exiting." + reset)
 		os.Exit(0)
 	}
 
-	// Split URLs by comma and process each
 	urlList := strings.Split(urls, ",")
 	var failedURLs []string
 	for _, url := range urlList {
@@ -54,11 +92,15 @@ func main() {
 			continue
 		}
 
-		// Indicate download start
 		fmt.Println("\n" + yellow + "Downloading: " + url + reset)
 
-		// Execute ytmax for the URL
-		cmd := exec.Command("ytmax", url)
+		var cmdArgs []string
+		if downloadDir != "" {
+			cmdArgs = append(cmdArgs, "-d", downloadDir)
+		}
+		cmdArgs = append(cmdArgs, url)
+
+		cmd := exec.Command("ytmax", cmdArgs...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {

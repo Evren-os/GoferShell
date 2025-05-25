@@ -18,20 +18,16 @@ const (
 )
 
 func main() {
-	// Parse command-line flags
-	noVersion := flag.Bool("no-version", false, "Strip version details from output")
+	noVersion := flag.Bool("no-ver", false, "Strip version details from output")
 	flag.Parse()
 
-	// Detect AUR helper
 	aurHelper := detectAURHelper()
 
-	// Check for checkupdates
 	if _, err := exec.LookPath("checkupdates"); err != nil {
 		fmt.Println(colorRed + "checkupdates is MIA. Install 'pacman-contrib' or rot." + colorReset)
 		os.Exit(1)
 	}
 
-	// If AUR helper is detected, ensure it's installed; otherwise, default to "paru" and check
 	if aurHelper == "" {
 		aurHelper = "paru"
 	}
@@ -40,7 +36,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Check if database sync is needed and perform it
 	if dbSyncNeeded() {
 		if err := syncDatabase(); err != nil {
 			fmt.Println(colorRed + "Sync failed. Internet’s dead or mirrors hate you." + colorReset)
@@ -48,21 +43,18 @@ func main() {
 		}
 	}
 
-	// Fetch updates
 	officialUpdates := fetchOfficialUpdates()
 	aurUpdates := fetchAURUpdates(aurHelper)
 
-	// Strip versions if flag is set
 	if *noVersion {
 		officialUpdates = stripVersions(officialUpdates)
 		aurUpdates = stripVersions(aurUpdates)
 	}
 
-	// Display results
 	displayResults(officialUpdates, aurUpdates, aurHelper)
 }
 
-// detectAURHelper checks for available AUR helpers
+// Checks for common AUR helpers
 func detectAURHelper() string {
 	if _, err := exec.LookPath("paru"); err == nil {
 		return "paru"
@@ -73,12 +65,12 @@ func detectAURHelper() string {
 	return ""
 }
 
-// dbSyncNeeded checks if the package database is older than 24 hours
+// Checks if the pacman sync databases are older than 24 hours
 func dbSyncNeeded() bool {
 	syncDir := "/var/lib/pacman/sync"
 	files, err := os.ReadDir(syncDir)
 	if err != nil {
-		return true // Assume sync is needed if directory can't be read
+		return true
 	}
 	for _, file := range files {
 		if file.IsDir() {
@@ -95,7 +87,6 @@ func dbSyncNeeded() bool {
 	return false
 }
 
-// syncDatabase runs pacman -Sy to synchronize the package database
 func syncDatabase() error {
 	cmd := exec.Command("sudo", "pacman", "-Sy", "--quiet", "--noconfirm")
 	cmd.Stdout = nil
@@ -103,7 +94,7 @@ func syncDatabase() error {
 	return cmd.Run()
 }
 
-// fetchOfficialUpdates runs checkupdates to get official package updates
+// List pending official repository updates
 func fetchOfficialUpdates() string {
 	cmd := exec.Command("checkupdates")
 	output, err := cmd.Output()
@@ -113,7 +104,7 @@ func fetchOfficialUpdates() string {
 	return string(output)
 }
 
-// fetchAURUpdates runs the AUR helper to get AUR package updates
+// List pending AUR updates
 func fetchAURUpdates(aurHelper string) string {
 	cmd := exec.Command(aurHelper, "-Qua")
 	output, err := cmd.Output()
@@ -135,7 +126,6 @@ func fetchAURUpdates(aurHelper string) string {
 	return strings.Join(filtered, "\n")
 }
 
-// stripVersions removes version details, keeping only package names
 func stripVersions(updates string) string {
 	lines := strings.Split(updates, "\n")
 	var packages []string
@@ -151,7 +141,6 @@ func stripVersions(updates string) string {
 	return strings.Join(packages, "\n")
 }
 
-// displayResults prints the update information with colored output
 func displayResults(official, aur, aurHelper string) {
 	officialLines := strings.Split(strings.TrimSpace(official), "\n")
 	aurLines := strings.Split(strings.TrimSpace(aur), "\n")

@@ -5,92 +5,122 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
-// checkYTDLP ensures yt-dlp is installed and available
+// checkYTDLP ensures yt-dlp is installed and available in PATH.
 func checkYTDLP() error {
 	cmd := exec.Command("yt-dlp", "--version")
 	err := cmd.Run()
 	if err != nil {
-		return fmt.Errorf("yt-dlp is not installed or not found in PATH: %v", err)
+		return fmt.Errorf("yt-dlp is not installed or not found in PATH: %w", err)
 	}
 	return nil
 }
 
 func main() {
-	// Define command-line flags
-	var maxRes int
 	var codecPref string
-	flag.IntVar(&maxRes, "max-res", 2160, "Maximum resolution in pixels (e.g., 2160 for 4K)")
-	flag.StringVar(&codecPref, "codec", "av1", "Preferred codec (av1 or vp9)")
+	var destinationPath string
 
-	// Parse flags
+	// Usage message
+	flag.Usage = func() {
+		output := flag.CommandLine.Output()
+		fmt.Fprintf(output, "Usage: ytmax [options] URL\n\n")
+		fmt.Fprintf(output, "ytmax is a command-line tool to download videos (primarily from YouTube) using yt-dlp,\n")
+		fmt.Fprintf(output, "with specific preferences for quality (up to 4K) and codecs.\n\n")
+		fmt.Fprintf(output, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(output, "\nExamples:\n")
+		fmt.Fprintf(output, "  ytmax --codec vp9 -d /mnt/videos https://www.youtube.com/watch?v=VIDEO_ID\n")
+		fmt.Fprintf(output, "  ytmax -d /mnt/videos/my_special_video.mkv https://www.youtube.com/watch?v=VIDEO_ID\n")
+		fmt.Fprintf(output, "  ytmax -d ./my_downloads/ https://www.youtube.com/watch?v=VIDEO_ID  (saves into ./my_downloads/ using default filename pattern)\n")
+	}
+
+	// Define command-line flags
+	flag.StringVar(&codecPref, "codec", "av1", "Preferred video codec (av1 or vp9).")
+	flag.StringVar(&destinationPath, "d", "", "Download destination. Can be a directory (e.g., '~/videos/', './downloads/') or a full file path (e.g., '~/videos/my_video.mkv'). If a directory is specified, videos are saved there using a default naming scheme. If not specified, downloads to the current directory.")
+
 	flag.Parse()
 
-	// Validate remaining arguments (URL)
 	args := flag.Args()
 	if len(args) < 1 {
-		fmt.Println("Error: URL is required")
-		fmt.Println("Usage: ytmax [options] URL")
-		fmt.Println("Options:")
-		flag.PrintDefaults()
+		flag.Usage()
 		os.Exit(1)
 	}
 	url := args[0]
 
-	// Verify yt-dlp is available
+	// Verify yt-dlp dependency
 	if err := checkYTDLP(); err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	// Common yt-dlp options from YT_OPTS
+	// Filename pattern
+	filenamePattern := "%(title)s [%(id)s][%(height)sp][%(fps)sfps][%(vcodec)s][%(acodec)s].%(ext)s"
+
+	var outputArgForYTDLP string
+	if destinationPath == "" {
+		outputArgForYTDLP = filenamePattern
+	} else {
+		isTargetLikelyDirectory := false
+		if strings.HasSuffix(destinationPath, string(os.PathSeparator)) {
+			isTargetLikelyDirectory = true
+		} else {
+			info, err := os.Stat(destinationPath)
+			if err == nil && info.IsDir() {
+				isTargetLikelyDirectory = true
+			}
+		}
+
+		if isTargetLikelyDirectory {
+			outputArgForYTDLP = filepath.Join(destinationPath, filenamePattern)
+		} else {
+			outputArgForYTDLP = destinationPath
+		}
+	}
+
+	// Base yt-dlp command options
 	ytOpts := []string{
 		"--prefer-free-formats",
 		"--format-sort-force",
 		"--merge-output-format", "mkv",
 		"--concurrent-fragments", "3",
 		"--no-mtime",
-		"--output", "%(title)s [%(id)s][%(height)sp][%(fps)sfps][%(vcodec)s][%(acodec)s].%(ext)s",
+		"--output", outputArgForYTDLP,
 		"--external-downloader", "aria2c",
 		"--external-downloader-args", "-x 16 -s 16 -k 1M",
 	}
 
-	// Validate max resolution
-	if maxRes <= 0 {
-		fmt.Println("Error: Maximum resolution must be a positive integer")
+	maxHeight := 2160
+	formatString := fmt.Sprintf("bv*[height<=%d]+ba/bv*[height<=%d]", maxHeight, maxHeight)
+
+	codecPref = strings.ToLower(codecPref)
+	var sortString string
+	switch codecPref {
+	case "av1":
+		sortString = "res,fps,vcodec:av01,vcodec:vp9.2,vcodec:vp9,vcodec:hev1,acodec:opus"
+	case "vp9":
+		sortString = "res,fps,vcodec:vp9,vcodec:vp9.2,vcodec:av01,vcodec:hev1,acodec:opus"
+	default:
+		fmt.Fprintln(os.Stderr, "Error: Invalid codec preference. Use 'av1' or 'vp9'.")
+		flag.Usage()
 		os.Exit(1)
 	}
-	formatString := fmt.Sprintf("bv*[height<=%d]+ba/bv*[height<=%d]", maxRes, maxRes)
 
-		// Validate and set sort string based on codec preference
-		codecPref = strings.ToLower(codecPref)
-		var sortString string
-		switch codecPref {
-			case "av1":
-				sortString = "res,fps,vcodec:av01,vcodec:vp9.2,vcodec:vp9,vcodec:hev1,acodec:opus"
-			case "vp9":
-				sortString = "res,fps,vcodec:vp9,vcodec:vp9.2,vcodec:av01,vcodec:hev1,acodec:opus"
-			default:
-				fmt.Println("Error: Invalid codec preference. Use 'av1' or 'vp9'")
-				os.Exit(1)
-		}
+	cmdArgs := append(ytOpts,
+		"--format", formatString,
+		"--format-sort", sortString,
+		url,
+	)
 
-		// Build the yt-dlp command
-		cmdArgs := append(ytOpts,
-				  "--format", formatString,
-		    "--format-sort", sortString,
-		    url,
-		)
+	cmd := exec.Command("yt-dlp", cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-		// Execute yt-dlp
-		cmd := exec.Command("yt-dlp", cmdArgs...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err := cmd.Run()
-		if err != nil {
-			fmt.Printf("Error executing yt-dlp: %v\n", err)
-			os.Exit(1)
-		}
+	err := cmd.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error executing yt-dlp: %v\n", err)
+		os.Exit(1)
+	}
 }
