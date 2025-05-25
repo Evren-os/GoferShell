@@ -1,217 +1,280 @@
 # GoferShell
 
-GoferShell is a collection of shell-agnostic Go utilities designed to enhance your terminal experience. Originally crafted for Arch Linux and its derivatives, these tools - covering package updates, speedy downloads, and a YouTube toolkit - are compiled to work seamlessly in any shell environment.
+**GoferShell** is a collection of shell-agnostic command-line utilities written in Go, designed to provide a consistent, efficient, and portable workflow across any terminal or shell environment. Originally crafted for Arch Linux and its derivatives, these tools are practical, minimal, and focused on real-world daily tasks—like checking for system updates, fast file downloads, and streamlined YouTube video management.
 
-## Overview
+> **Why GoferShell?**  
+> If you frequently switch between shells (fish, nushell, zsh, etc.) and want your custom command-line tools to "just work" everywhere, GoferShell is for you. Each utility is a standalone binary, requiring no shell-specific scripting or configuration.
 
-GoferShell includes the following utilities:
+---
 
-- **check_updates**: Check for package updates on Arch Linux, including official repositories and the AUR.
-- **dlfast**: Download files efficiently using `aria2`.
-- **dlfast_batch**: Batch download multiple files using `dlfast`.
-- **ytmax**: Download YouTube videos with customizable resolution and codec options.
-- **yt_batch**: Batch download multiple YouTube videos interactively.
-- **ytstream**: Stream YouTube videos with customizable resolution and codec options.
+## Table of Contents
 
-## Prerequisites
+- [Features & Utilities](#features--utilities)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [check_updates](#check_updates)
+  - [dlfast](#dlfast)
+  - [dlfast_batch](#dlfast_batch)
+  - [ytmax](#ytmax)
+  - [yt_batch](#yt_batch)
+  - [ytstream](#ytstream)
+- [Dependencies](#dependencies)
+- [Building from Source](#building-from-source)
+- [Contributing](#contributing)
+- [License](#license)
 
-Ensure the following dependencies are installed on your system before proceeding:
+---
 
+## Features & Utilities
+
+GoferShell includes the following command-line tools:
+
+| Utility         | Description                                                                                  | Platform         |
+|-----------------|---------------------------------------------------------------------------------------------|------------------|
+| **check_updates**   | Check for official and AUR package updates on Arch Linux and derivatives.                    | Arch-based only  |
+| **dlfast**          | Fast, resumable single-file downloader using `aria2`.                                       | Any Linux Distro              |
+| **dlfast_batch**    | Batch download multiple files via `dlfast`.                                                 | Any Linux Distro              |
+| **ytmax**           | Download a single YouTube video with preferred resolution and codec using `yt-dlp`.         | Any Linux Distro              |
+| **yt_batch**        | Batch download multiple YouTube videos interactively.                                       | Any Linux Distro              |
+| **ytstream**        | Stream YouTube (and similar) videos directly in `mpv` with preferred quality.               | Any Linux Distro              |
+
+All utilities are designed to be portable and shell-agnostic—just drop the binaries in your `$PATH` and use them anywhere.
+
+---
+
+## Installation
+
+### 1. Prerequisites
+
+Ensure the following are installed on your system:
+
+- **Go** (for building from source)
+- **aria2** (for downloads)
+- **yt-dlp** (for YouTube tools)
+- **mpv** (for streaming)
+- **pacman-contrib** and an AUR helper (`paru` or `yay`) for `check_updates` (Arch-based only)
+- **paru** or **yay** (for AUR updates)
+- **Go package:** `github.com/chzyer/readline` (fetched automatically for `yt_batch`)
+
+### 2. Clone the Repository
+
+```sh
+git clone https://github.com/Evren-os/GoferShell.git
+cd GoferShell
 ```
-go pacman-contrib paru/yay aria2 yt-dlp mpv
+
+### 3. Build All Utilities
+
+```sh
+go mod init github.com/Evren-os/GoferShell
+go get github.com/chzyer/readline
+go build check_updates.go
+go build dlfast.go
+go build dlfast_batch.go
+go build ytmax.go
+go build yt_batch.go
+go build ytstream.go
 ```
 
-The `yt_batch` utility also requires the `github.com/chzyer/readline` Go package, which is fetched during installation.
+### 4. Install the Binaries
 
-## Installation and Usage
+Copy the executables to a directory in your `$PATH` (e.g., `~/.local/bin/`):
 
-### Installation
+```sh
+mkdir -p ~/.local/bin/
+cp check_updates dlfast dlfast_batch ytmax yt_batch ytstream ~/.local/bin/
+chmod +x ~/.local/bin/check_updates ~/.local/bin/dlfast ~/.local/bin/dlfast_batch ~/.local/bin/ytmax ~/.local/bin/yt_batch ~/.local/bin/ytstream
+```
 
-Follow these steps to install the GoferShell utilities:
+Ensure `~/.local/bin` is in your `$PATH` (add to your shell config if needed):
 
-1. **Clone the repository**:
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-   ```sh
-   git clone https://github.com/Evren-os/GoferShell.git
-   ```
+---
 
-2. **Navigate to the repository directory**:
+## Usage
 
-   ```sh
-   cd GoferShell
-   ```
+### check_updates
 
-3. **Initialize a Go module**:
+Check for available package updates (official + AUR) on Arch Linux.
 
-   ```sh
-   go mod init github.com/Evren-os/GoferShell
-   ```
+```sh
+check_updates [-no-ver]
+```
 
-4. **Fetch the required Go dependency**:
+- `-no-ver` : Omit version details from output.
 
-   ```sh
-   go get github.com/chzyer/readline
-   ```
+**Example:**
 
-5. **Build the utilities**:
+```sh
+check_updates
+```
 
-   ```sh
-   go build *.go
-   ```
+> **Note:** Requires `checkupdates` (from `pacman-contrib`) and an AUR helper (`paru` or `yay`).
 
-   This command compiles each `.go` file into its respective executable.
+---
 
-6. **Copy the executables to a directory in your PATH** (e.g., `~/.local/bin/`):
+### dlfast
 
-   ```sh
-   mkdir -p ~/.local/bin/
-   cp check_updates dlfast dlfast_batch ytmax yt_batch ytstream ~/.local/bin/
-   ```
+Fast, resumable file downloader using `aria2`.
 
-7.  **Make the utilities executable**:
+```sh
+dlfast [-d target_directory_or_filepath] <URL>
+```
+
+- `-d` : Target directory or full file path. If omitted, downloads to current directory.
+
+**Examples:**
+
+```sh
+dlfast http://example.com/file.zip
+dlfast -d ~/Downloads/ http://example.com/file.zip
+dlfast -d ~/Downloads/file.zip http://example.com/file.zip
+```
+
+---
+
+### dlfast_batch
+
+Batch download multiple files using `dlfast`.
+
+```sh
+dlfast_batch [-d target_directory] <URL1> [URL2 ...]
+```
+
+- `-d` : Download all files to this directory.
+
+**Example:**
+
+```sh
+dlfast_batch -d ~/Downloads "http://example.com/file1.zip" "http://example.com/file2.zip"
+```
+
+---
+
+### ytmax
+
+Download a single YouTube video with preferred resolution and codec.
+
+```sh
+ytmax [--max-res RES] [--codec CODEC] [-d DEST] <URL>
+```
+
+- `--codec`   : Preferred codec (`av1` or `vp9`, default: `av1`)
+- `-d`        : Output directory or full file path
+
+**Examples:**
+
+```sh
+ytmax -d ~/Videos/ https://www.youtube.com/watch?v=video_id
+ytmax -d ~/Videos/myfile.mkv https://www.youtube.com/watch?v=video_id
+```
+
+---
+
+### yt_batch
+
+Interactively batch download multiple YouTube videos.
+
+```sh
+yt_batch [-d directory]
+```
+
+- Prompts for a comma-separated list of URLs.
+- `-d` : Download directory (optional).
+
+**Example:**
+
+```sh
+yt_batch
+# Enter video URLs (separated by commas): https://youtu.be/abc, https://youtu.be/xyz
+```
+
+---
+
+### ytstream
+
+Stream a YouTube (or similar) video directly in `mpv`.
+
+```sh
+ytstream [--max-res RES] [--codec CODEC] <URL>
+```
+
+- `--max-res` : Maximum resolution (default: 2160)
+- `--codec`   : Preferred codec (`av1` or `vp9`, default: `av1`)
+
+**Example:**
+
+```sh
+ytstream --max-res 720 --codec av1 https://www.youtube.com/watch?v=video_id
+```
+
+---
+
+## Dependencies
+
+| Utility         | Required Programs / Libraries                |
+|-----------------|---------------------------------------------|
+| check_updates   | `pacman-contrib`, `paru` or `yay`           |
+| dlfast          | `aria2`                                     |
+| dlfast_batch    | `aria2`, `dlfast` in `$PATH`                |
+| ytmax           | `yt-dlp`, `aria2`                           |
+| yt_batch        | `ytmax`, Go package `github.com/chzyer/readline` |
+| ytstream        | `yt-dlp`, `mpv`                             |
+
+Install dependencies using your package manager. For Arch-based systems:
+
+```sh
+sudo pacman -S go pacman-contrib aria2 yt-dlp mpv
+```
+
+---
+
+## Building from Source
+
+1. **Clone the repo and enter the directory:**
 
     ```sh
-    chmod +x ~/.local/bin/check_updates ~/.local/bin/dlfast ~/.local/bin/dlfast_batch ~/.local/bin/ytmax ~/.local/bin/yt_batch ~/.local/bin/ytstream
+    git clone https://github.com/Evren-os/GoferShell.git
+    cd GoferShell
     ```
-   
-8. **Verify your PATH**: Ensure `~/.local/bin/` is in your shell’s PATH. If not, add it by appending this line to your shell configuration file (e.g., `~/.bashrc`, `~/.zshrc`):
 
-   ```sh
-   export PATH="$HOME/.local/bin:$PATH"
-   ```
-
-   Then, reload the configuration:
-
-   ```sh
-   source ~/.bashrc  # or ~/.zshrc, depending on your shell
-   ```
-
-### Usage
-
-#### check_updates
-
-Checks for available package updates on Arch Linux, including official and AUR packages.
-
-- **Usage**:
-
-  ```sh
-  check_updates [-no-version]
-  ```
-
-- **Options**:
-  - `-no-version`: Omit version details from the output
-
-- **Example**:
-
-  ```sh
-  check_updates
-  ```
-
-- **Note**: This utility is tailored for Arch Linux and requires `checkupdates` and an AUR helper.
-
-#### dlfast
-
-Downloads files using `aria2c` for enhanced speed and reliability.
-
-- **Usage**:
-
-  ```sh
-  dlfast <URL> [target_directory_or_filepath]
-  ```
-
-- **Examples**:
-  - Download to the current directory:
+2. **Initialize Go module and fetch dependencies:**
 
     ```sh
-    dlfast http://example.com/file.zip
+    go mod init github.com/Evren-os/GoferShell
+    go get github.com/chzyer/readline
     ```
 
-  - Download to a specific directory:
+3. **Build all utilities:**
 
     ```sh
-    dlfast http://example.com/file.zip /path/to/directory/
+    go build check_updates.go
+    go build dlfast.go
+    go build dlfast_batch.go
+    go build ytmax.go
+    go build yt_batch.go
+    go build ytstream.go
     ```
 
-  - Download to a specific file path:
+4. **Copy binaries to your `$PATH` as described above.**
 
-    ```sh
-    dlfast http://example.com/file.zip ~/Downloads/file.zip
-    ```
+---
 
-#### dlfast_batch
+## Contributing
 
-Batch downloads multiple files using `dlfast`.
+GoferShell is a personal workflow project, but contributions, suggestions, and improvements are welcome!  
+Feel free to open issues or submit pull requests.
 
-- **Usage**:
+---
 
-  ```sh
-  dlfast_batch [-d target_directory] url1 [url2 ...]
-  ```
+## License
 
-- **Options**:
-  - `-d target_directory`: specify a directory for all downloads
+This project is licensed under the MIT License.  
+See [LICENSE](LICENSE) for details.
 
-- **Example**:
+---
 
-  ```sh
-  dlfast_batch -d ~/Downloads "http://example.com/file1.zip" "http://example.com/file2.zip"
-  ```
-
-#### ytmax
-
-Downloads YouTube videos using `yt-dlp`, with options for resolution and codec.
-
-- **Usage**:
-
-  ```sh
-  ytmax [options] URL
-  ```
-
-- **Options**:
-  - `--max-res RES`: maximum resolution in pixels (default: 2160)
-  - `--codec CODEC`: preferred codec (`av1` or `vp9`, default: `av1`)
-
-- **Example**:
-
-  ```sh
-  ytmax --max-res 1080 --codec vp9 https://www.youtube.com/watch?v=video_id
-  ```
-
-#### yt_batch
-
-Batch downloads multiple YouTube videos interactively.
-
-- **Usage**:
-
-  Run the command and enter URLs separated by commas when prompted:
-
-  ```sh
-  yt_batch
-  ```
-
-- **Example**:
-
-  ```sh
-  yt_batch
-  Enter video URLs (separated by commas). Press [ENTER] when done: https://www.youtube.com/watch?v=video1, https://www.youtube.com/watch?v=video2
-  ```
-
-#### ytstream
-
-Streams YouTube videos using `yt-dlp` and `mpv`, with customizable resolution and codec options.
-
-- **Usage**:
-
-  ```sh
-  ytstream [options] URL
-  ```
-
-- **Options**:
-  - `--max-res RES`: maximum resolution in pixels (default: 2160)
-  - `--codec CODEC`: preferred codec (`av1` or `vp9`, default: `av1`)
-
-- **Example**:
-
-  ```sh
-  ytstream --max-res 720 --codec av1 https://www.youtube.com/watch?v=video_id
-  ```
+**GoferShell** - Minimal, portable, and shell-agnostic CLI tools for your daily workflow.
