@@ -200,21 +200,21 @@ func displayResults(official, aur string) {
 	aurCount := countUpdates(aur)
 
 	if officialCount == 0 && aurCount == 0 {
-		fmt.Printf("%sSystem is up to date.%s\n", colorBlue, colorReset)
+		fmt.Printf("%sAll patched. The universe is in balance.%s\n", colorBlue, colorReset)
 		return
 	}
 
 	if officialCount > 0 {
-		fmt.Printf("%s%d official updates. The grind never stops.%s\n", colorGreen, officialCount, colorReset)
+		fmt.Printf("%sThe mothership is hailing: %d new directives.%s\n", colorGreen, officialCount, colorReset)
 		fmt.Println(official)
 	} else {
-		fmt.Printf("%sOfficial repositories are up to date.%s\n", colorBlue, colorReset)
+		fmt.Printf("%sMainline is stable. As it should be.%s\n", colorBlue, colorReset)
 	}
 
 	if aurCount > 0 {
-		fmt.Printf("%s%d AUR updates. They're watching.%s\n", colorYellow, aurCount, colorReset)
+		fmt.Printf("%s%d new AUR bounties.%s\n", colorYellow, aurCount, colorReset)
 		fmt.Println(aur)
 	} else {
-		fmt.Printf("%sAUR is up to date.%s\n", colorBlue, colorReset)
+		fmt.Printf("%sAUR sleeps. Silence is deadly.%s\n", colorBlue, colorReset)
 	}
 }
