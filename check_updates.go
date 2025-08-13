@@ -17,7 +17,7 @@ const (
 	colorYellow = "\033[33m"
 	colorBlue   = "\033[34m"
 	colorReset  = "\033[0m"
-	
+
 	commandTimeout = 30 * time.Second
 )
 
@@ -50,12 +50,22 @@ func main() {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				officialChan <- updateResult{"", fmt.Errorf("panic recovered: %v", r)}
+			}
+		}()
 		output, err := fetchOfficialUpdates()
 		officialChan <- updateResult{output, err}
 	}()
 
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				aurChan <- updateResult{"", fmt.Errorf("panic recovered: %v", r)}
+			}
+		}()
 		output, err := fetchAURUpdates(aurHelper)
 		aurChan <- updateResult{output, err}
 	}()
@@ -98,7 +108,7 @@ func detectAURHelper() string {
 	return ""
 }
 
-func runCommandWithTimeout(name string, args ...string) (string, error) {
+func runCommand(name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
@@ -108,25 +118,28 @@ func runCommandWithTimeout(name string, args ...string) (string, error) {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("command timed out")
 		}
-		// Handle common "no updates" exit codes
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode := exitErr.ExitCode()
-			if exitCode == 1 || exitCode == 2 {
-				return "", nil
-			}
-		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
 }
 
 func fetchOfficialUpdates() (string, error) {
-	return runCommandWithTimeout("checkupdates")
+	output, err := runCommand("checkupdates")
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+			return "", nil // Exit code 2 means no updates
+		}
+		return "", err
+	}
+	return output, nil
 }
 
 func fetchAURUpdates(aurHelper string) (string, error) {
-	output, err := runCommandWithTimeout(aurHelper, "-Qua")
+	output, err := runCommand(aurHelper, "-Qua")
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return "", nil // Exit code 1 means no updates for paru/yay
+		}
 		return "", err
 	}
 
@@ -136,7 +149,7 @@ func fetchAURUpdates(aurHelper string) (string, error) {
 
 	lines := strings.Split(output, "\n")
 	var builder strings.Builder
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -151,7 +164,7 @@ func fetchAURUpdates(aurHelper string) (string, error) {
 			builder.WriteString(line)
 		}
 	}
-	
+
 	return builder.String(), nil
 }
 
@@ -162,7 +175,7 @@ func stripVersions(updates string) string {
 
 	lines := strings.Split(updates, "\n")
 	var builder strings.Builder
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -176,7 +189,7 @@ func stripVersions(updates string) string {
 			builder.WriteString(parts[0])
 		}
 	}
-	
+
 	return builder.String()
 }
 
@@ -184,13 +197,15 @@ func countUpdates(updates string) int {
 	if updates == "" {
 		return 0
 	}
-	
-	lines := strings.Split(updates, "\n")
 	count := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
+	for _, r := range updates {
+		if r == '\n' {
 			count++
 		}
+	}
+	// Add 1 for the last line if the string is not empty
+	if len(updates) > 0 {
+		count++
 	}
 	return count
 }
