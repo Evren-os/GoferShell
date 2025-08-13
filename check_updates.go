@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,156 +17,204 @@ const (
 	colorYellow = "\033[33m"
 	colorBlue   = "\033[34m"
 	colorReset  = "\033[0m"
+	
+	commandTimeout = 30 * time.Second
 )
+
+type updateResult struct {
+	output string
+	err    error
+}
 
 func main() {
 	noVersion := flag.Bool("no-ver", false, "Strip version details from output")
 	flag.Parse()
 
-	aurHelper := detectAURHelper()
-
+	// Verify required commands exist
 	if _, err := exec.LookPath("checkupdates"); err != nil {
-		fmt.Println(colorRed + "checkupdates is MIA. Install 'pacman-contrib' or rot." + colorReset)
+		fmt.Printf("%scheckupdates is MIA. Install 'pacman-contrib' or rot.%s\n", colorRed, colorReset)
 		os.Exit(1)
 	}
 
+	aurHelper := detectAURHelper()
 	if aurHelper == "" {
-		aurHelper = "paru"
-	}
-	if _, err := exec.LookPath(aurHelper); err != nil {
-		fmt.Println(colorRed + aurHelper + " is missing. Please install it." + colorReset)
+		fmt.Printf("%sNo AUR helper found. Install paru or yay.%s\n", colorRed, colorReset)
 		os.Exit(1)
 	}
 
-	if dbSyncNeeded() {
-		if err := syncDatabase(); err != nil {
-			fmt.Println(colorRed + "Sync failed. Internet’s dead or mirrors hate you." + colorReset)
-			os.Exit(1)
-		}
+	// Fetch updates concurrently
+	var wg sync.WaitGroup
+	officialChan := make(chan updateResult, 1)
+	aurChan := make(chan updateResult, 1)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		output, err := fetchOfficialUpdates()
+		officialChan <- updateResult{output, err}
+	}()
+
+	go func() {
+		defer wg.Done()
+		output, err := fetchAURUpdates(aurHelper)
+		aurChan <- updateResult{output, err}
+	}()
+
+	wg.Wait()
+	close(officialChan)
+	close(aurChan)
+
+	officialResult := <-officialChan
+	aurResult := <-aurChan
+
+	// Handle errors - only report actual failures, not "no updates"
+	if officialResult.err != nil {
+		fmt.Printf("%sFailed to check official updates: %v%s\n", colorRed, officialResult.err, colorReset)
+		os.Exit(1)
+	}
+	if aurResult.err != nil {
+		fmt.Printf("%sFailed to check AUR updates: %v%s\n", colorRed, aurResult.err, colorReset)
+		os.Exit(1)
 	}
 
-	officialUpdates := fetchOfficialUpdates()
-	aurUpdates := fetchAURUpdates(aurHelper)
+	officialUpdates := officialResult.output
+	aurUpdates := aurResult.output
 
 	if *noVersion {
 		officialUpdates = stripVersions(officialUpdates)
 		aurUpdates = stripVersions(aurUpdates)
 	}
 
-	displayResults(officialUpdates, aurUpdates, aurHelper)
+	displayResults(officialUpdates, aurUpdates)
 }
 
-// Checks for common AUR helpers
 func detectAURHelper() string {
-	if _, err := exec.LookPath("paru"); err == nil {
-		return "paru"
-	}
-	if _, err := exec.LookPath("yay"); err == nil {
-		return "yay"
+	helpers := []string{"paru", "yay"}
+	for _, helper := range helpers {
+		if _, err := exec.LookPath(helper); err == nil {
+			return helper
+		}
 	}
 	return ""
 }
 
-// Checks if the pacman sync databases are older than 24 hours
-func dbSyncNeeded() bool {
-	syncDir := "/var/lib/pacman/sync"
-	files, err := os.ReadDir(syncDir)
-	if err != nil {
-		return true
-	}
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-		info, err := file.Info()
-		if err != nil {
-			continue
-		}
-		if time.Since(info.ModTime()) > 24*time.Hour {
-			return true
-		}
-	}
-	return false
-}
+func runCommandWithTimeout(name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
 
-func syncDatabase() error {
-	cmd := exec.Command("sudo", "pacman", "-Sy", "--quiet", "--noconfirm")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run()
-}
-
-// List pending official repository updates
-func fetchOfficialUpdates() string {
-	cmd := exec.Command("checkupdates")
+	cmd := exec.CommandContext(ctx, name, args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return ""
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("command timed out")
+		}
+		// Handle common "no updates" exit codes
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode := exitErr.ExitCode()
+			if exitCode == 1 || exitCode == 2 {
+				return "", nil
+			}
+		}
+		return "", err
 	}
-	return string(output)
+	return strings.TrimSpace(string(output)), nil
 }
 
-// List pending AUR updates
-func fetchAURUpdates(aurHelper string) string {
-	cmd := exec.Command(aurHelper, "-Qua")
-	output, err := cmd.Output()
+func fetchOfficialUpdates() (string, error) {
+	return runCommandWithTimeout("checkupdates")
+}
+
+func fetchAURUpdates(aurHelper string) (string, error) {
+	output, err := runCommandWithTimeout(aurHelper, "-Qua")
 	if err != nil {
-		return ""
+		return "", err
 	}
-	lines := strings.Split(string(output), "\n")
-	var filtered []string
+
+	if output == "" {
+		return "", nil
+	}
+
+	lines := strings.Split(output, "\n")
+	var builder strings.Builder
+	
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+		// Normalize whitespace and filter ignored packages
 		line = strings.Join(strings.Fields(line), " ")
 		if !strings.HasSuffix(line, "[ignored]") {
-			filtered = append(filtered, line)
+			if builder.Len() > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString(line)
 		}
 	}
-	return strings.Join(filtered, "\n")
+	
+	return builder.String(), nil
 }
 
 func stripVersions(updates string) string {
+	if updates == "" {
+		return ""
+	}
+
 	lines := strings.Split(updates, "\n")
-	var packages []string
+	var builder strings.Builder
+	
 	for _, line := range lines {
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 		parts := strings.Fields(line)
 		if len(parts) > 0 {
-			packages = append(packages, parts[0])
+			if builder.Len() > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString(parts[0])
 		}
 	}
-	return strings.Join(packages, "\n")
+	
+	return builder.String()
 }
 
-func displayResults(official, aur, aurHelper string) {
-	officialLines := strings.Split(strings.TrimSpace(official), "\n")
-	aurLines := strings.Split(strings.TrimSpace(aur), "\n")
-	hasOfficial := len(officialLines) > 0 && officialLines[0] != ""
-	hasAur := len(aurLines) > 0 && aurLines[0] != ""
+func countUpdates(updates string) int {
+	if updates == "" {
+		return 0
+	}
+	
+	lines := strings.Split(updates, "\n")
+	count := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
 
-	if !hasOfficial && !hasAur {
-		fmt.Println(colorBlue + "No updates. Your system mocks entropy." + colorReset)
+func displayResults(official, aur string) {
+	officialCount := countUpdates(official)
+	aurCount := countUpdates(aur)
+
+	if officialCount == 0 && aurCount == 0 {
+		fmt.Printf("%sSystem is up to date.%s\n", colorBlue, colorReset)
 		return
 	}
 
-	if hasOfficial {
-		fmt.Printf("%s%d official updates. The grind never stops.%s\n", colorGreen, len(officialLines), colorReset)
+	if officialCount > 0 {
+		fmt.Printf("%s%d official updates. The grind never stops.%s\n", colorGreen, officialCount, colorReset)
 		fmt.Println(official)
 	} else {
-		fmt.Println(colorBlue + "Official repos: barren." + colorReset)
+		fmt.Printf("%sOfficial repositories are up to date.%s\n", colorBlue, colorReset)
 	}
 
-	if aurHelper != "" {
-		if hasAur {
-			fmt.Printf("%s%d AUR updates. They’re watching.%s\n", colorYellow, len(aurLines), colorReset)
-			fmt.Println(aur)
-		} else {
-			fmt.Println(colorBlue + "AUR sleeps. Silence is deadly." + colorReset)
-		}
+	if aurCount > 0 {
+		fmt.Printf("%s%d AUR updates. They're watching.%s\n", colorYellow, aurCount, colorReset)
+		fmt.Println(aur)
+	} else {
+		fmt.Printf("%sAUR is up to date.%s\n", colorBlue, colorReset)
 	}
 }
