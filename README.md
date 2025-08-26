@@ -156,39 +156,46 @@ dlfast_batch -d ~/Downloads "http://example.com/file1.zip" "http://example.com/f
 
 ### ytmax
 
-Download a single YouTube video with preferred resolution and codec.
+Download a single video with preferred resolution and codec using `yt-dlp` and `aria2c`.
 
 ```sh
-ytmax [--max-res RES] [--codec CODEC] [-d DEST] <URL>
+ytmax [options] <URL>
 ```
 
-- `--codec`   : Preferred codec (`av1` or `vp9`, default: `av1`)
-- `-d`        : Output directory or full file path
+- `-codec <name>`: Preferred codec (`av1` or `vp9`, default: `av1`).
+- `-d <path>`: Output directory or full file path.
+- `-socm`: Download in a highly compatible MP4 format (H.264/AAC) for social media. Overrides `-codec`.
+- `--cookies-from <browser>`: Use cookies from a browser (e.g., `firefox`, `chrome`) to bypass login walls or `403 Forbidden` errors.
 
 **Examples:**
 
 ```sh
+# Download a 4K video with AV1 codec to the Videos directory
 ytmax -d ~/Videos/ https://www.youtube.com/watch?v=video_id
-ytmax -d ~/Videos/myfile.mkv https://www.youtube.com/watch?v=video_id
+
+# Download for social media using Firefox cookies to prevent errors
+ytmax -socm --cookies-from firefox https://www.youtube.com/watch?v=video_id
 ```
 
 ---
 
 ### yt_batch
 
-Interactively batch download multiple YouTube videos.
+Interactively batch download multiple videos concurrently.
 
 ```sh
-yt_batch [-d directory]
+yt_batch [options]
 ```
 
 - Prompts for a comma-separated list of URLs.
-- `-d` : Download directory (optional).
+- `-p <num>`: Number of parallel downloads (default: 4).
+- All flags from `ytmax` are supported (`-d`, `-codec`, `-socm`, `--cookies-from`) and will be applied to all videos in the batch.
 
 **Example:**
 
 ```sh
-yt_batch
+# Start a batch download using Chrome cookies, saving to a specific directory
+yt_batch -d ~/Videos/Batch --cookies-from chrome
 # Enter video URLs (separated by commas): https://youtu.be/abc, https://youtu.be/xyz
 ```
 
@@ -196,19 +203,21 @@ yt_batch
 
 ### ytstream
 
-Stream a YouTube (or similar) video directly in `mpv`.
+Stream a video directly in `mpv` by piping from `yt-dlp`. This method is highly robust and works for all formats.
 
 ```sh
-ytstream [--max-res RES] [--codec CODEC] <URL>
+ytstream [options] <URL>
 ```
 
-- `--max-res` : Maximum resolution (default: 2160)
-- `--codec`   : Preferred codec (`av1` or `vp9`, default: `av1`)
+- `--max-res <res>`: Maximum resolution (e.g., `1080`, `2160`, default: `2160`).
+- `--codec <name>`: Preferred codec (`av1` or `vp9`, default: `av1`).
+- `--cookies-from <browser>`: Use browser cookies to access private videos or prevent errors.
 
 **Example:**
 
 ```sh
-ytstream --max-res 720 --codec av1 https://www.youtube.com/watch?v=video_id
+# Stream a video at 1080p using Firefox cookies
+ytstream --max-res 1080 --cookies-from firefox https://www.youtube.com/watch?v=video_id
 ```
 
 ---

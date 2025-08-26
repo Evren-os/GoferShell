@@ -8,68 +8,104 @@ import (
 	"strings"
 )
 
-func main() {
-	// Check for required dependencies
-	if _, err := exec.LookPath("yt-dlp"); err != nil {
-		fmt.Fprintln(os.Stderr, "Error: yt-dlp not found in PATH")
-		os.Exit(1)
+// Constants for codec names.
+const (
+	codecAV1 = "av1"
+	codecVP9 = "vp9"
+)
+
+// fatalf prints a formatted error message to stderr and exits with status 1.
+func fatalf(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
+	os.Exit(1)
+}
+
+// checkDependencies ensures that all required command-line tools are installed and in the PATH.
+func checkDependencies(cmds ...string) {
+	for _, cmd := range cmds {
+		if _, err := exec.LookPath(cmd); err != nil {
+			fatalf("%s is not installed or not found in PATH", cmd)
+		}
 	}
-	if _, err := exec.LookPath("mpv"); err != nil {
-		fmt.Fprintln(os.Stderr, "Error: mpv not found in PATH")
-		os.Exit(1)
+}
+
+func main() {
+	// Define command-line flags.
+	var (
+		maxRes      int
+		codec       string
+		cookiesFrom string
+	)
+
+	flag.IntVar(&maxRes, "max-res", 2160, "Maximum video resolution (e.g., 1080, 2160).")
+	flag.StringVar(&codec, "codec", codecAV1, "Preferred video codec (av1 or vp9).")
+	flag.StringVar(&cookiesFrom, "cookies-from", "", "Load cookies from the specified browser (e.g., firefox, chrome).")
+
+	flag.Usage = func() {
+		out := flag.CommandLine.Output()
+		fmt.Fprintf(out, "Usage: ytstream [options] URL\n\n")
+		fmt.Fprintf(out, "A tool to stream videos directly to a media player using a yt-dlp to mpv pipe.\n\n")
+		fmt.Fprintf(out, "Options:\n")
+		flag.PrintDefaults()
 	}
 
-	// Parse command-line flags
-	maxRes := flag.Int("max-res", 2160, "Maximum resolution (e.g., 2160 for 4K)")
-	codec := flag.String("codec", "av1", "Preferred codec (av1 or vp9)")
 	flag.Parse()
 
-	// Validate URL argument
-	args := flag.Args()
-	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "Usage: ytstream [options] URL")
-		fmt.Fprintln(os.Stderr, "Options: --max-res RES (default 2160), --codec CODEC (default av1)")
+	if flag.NArg() < 1 {
+		flag.Usage()
 		os.Exit(1)
 	}
-	url := args[0]
+	url := flag.Arg(0)
 
-	// Validate codec
-	if *codec != "av1" && *codec != "vp9" {
-		fmt.Fprintln(os.Stderr, "Invalid codec preference:", *codec, ". Use av1 or vp9.")
+	checkDependencies("yt-dlp", "mpv")
+
+	formatString := fmt.Sprintf("bv*[height<=%d]+ba/bv*[height<=%d]", maxRes, maxRes)
+	var sortString string
+	switch strings.ToLower(codec) {
+	case codecAV1:
+		sortString = "res,fps,vcodec:av01,vcodec:vp9.2,vcodec:vp9,vcodec:hev1,acodec:opus"
+	case codecVP9:
+		sortString = "res,fps,vcodec:vp9,vcodec:vp9.2,vcodec:av01,vcodec:hev1,acodec:opus"
+	default:
+		fatalf("Invalid codec preference. Use '%s' or '%s'.", codecAV1, codecVP9)
+	}
+
+	ytdlpArgs := []string{
+		"--prefer-free-formats",
+		"--format", formatString,
+		"--format-sort", sortString,
+		"-o", "-", // Output to standard output
+	}
+
+	if cookiesFrom != "" {
+		ytdlpArgs = append(ytdlpArgs, "--cookies-from-browser", cookiesFrom)
+	}
+
+	ytdlpArgs = append(ytdlpArgs, url)
+
+	cmdYtdlp := exec.Command("yt-dlp", ytdlpArgs...)
+	cmdMpv := exec.Command("mpv", "-")
+
+	pipe, err := cmdYtdlp.StdoutPipe()
+	if err != nil {
+		fatalf("failed to create pipe: %v", err)
+	}
+	cmdMpv.Stdin = pipe
+
+	cmdYtdlp.Stderr = os.Stderr
+	cmdMpv.Stderr = os.Stderr
+
+	if err := cmdYtdlp.Start(); err != nil {
+		fatalf("failed to start yt-dlp: %v", err)
+	}
+	if err := cmdMpv.Start(); err != nil {
+		fatalf("failed to start mpv: %v", err)
+	}
+
+	if err := cmdMpv.Wait(); err != nil {
+		_ = cmdYtdlp.Process.Kill()
 		os.Exit(1)
 	}
 
-	// Construct yt-dlp format and sort strings
-	formatString := fmt.Sprintf("bv*[height<=%d]+ba/bv*[height<=%d]", *maxRes, *maxRes)
-		var sortString string
-		if *codec == "av1" {
-			sortString = "res,fps,vcodec:av01,vcodec:vp9.2,vcodec:vp9,vcodec:hev1,acodec:opus"
-		} else {
-			sortString = "res,fps,vcodec:vp9,vcodec:vp9.2,vcodec:av01,vcodec:hev1,acodec:opus"
-		}
-
-		// Fetch stream URL with yt-dlp
-		cmd := exec.Command("yt-dlp", "--prefer-free-formats", "--format", formatString, "--format-sort", sortString, "--get-url", url)
-		output, err := cmd.Output()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to get stream URL:", err)
-			os.Exit(1)
-		}
-
-		// Extract and validate stream URL
-		lines := strings.Split(string(output), "\n")
-		if len(lines) == 0 || lines[0] == "" {
-			fmt.Fprintln(os.Stderr, "Failed to get stream URL")
-			os.Exit(1)
-		}
-		streamURL := strings.TrimSpace(lines[0])
-
-		// Play stream with mpv
-		mpvCmd := exec.Command("mpv", streamURL)
-		mpvCmd.Stdout = os.Stdout
-		mpvCmd.Stderr = os.Stderr
-		if err := mpvCmd.Run(); err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to run mpv:", err)
-			os.Exit(1)
-		}
+	_ = cmdYtdlp.Wait()
 }
