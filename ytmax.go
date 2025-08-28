@@ -3,10 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 )
 
 // Constants for yt-dlp arguments and settings.
@@ -16,8 +20,8 @@ const (
 	codecAV1               = "av1"
 	codecVP9               = "vp9"
 
-	// Settings for social media compatibility.
-	socmFormat      = "bv[vcodec^=avc]+ba[acodec^=mp4a]/b[vcodec^=avc]"
+	// Settings for social media compatibility (optimized for modern platforms).
+	socmFormat      = "bv*[vcodec^=avc][height<=1080]+ba[acodec^=mp4a]/b[vcodec^=avc][height<=1080]"
 	socmMergeFormat = "mp4"
 )
 
@@ -34,6 +38,39 @@ func checkDependencies(cmds ...string) {
 			fatalf("%s is not installed or not found in PATH", cmd)
 		}
 	}
+}
+
+// validateURL performs basic URL validation.
+func validateURL(rawURL string) bool {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return false
+	}
+	_, err := url.Parse(rawURL)
+	return err == nil && (strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://"))
+}
+
+// sanitizeAndDeduplicateURLs cleans and deduplicates the URL list.
+func sanitizeAndDeduplicateURLs(urls []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, rawURL := range urls {
+		cleanURL := strings.TrimSpace(rawURL)
+		if cleanURL == "" {
+			continue
+		}
+		if !validateURL(cleanURL) {
+			fmt.Printf("Warning: Skipping invalid URL: %s\n", cleanURL)
+			continue
+		}
+		if !seen[cleanURL] {
+			seen[cleanURL] = true
+			result = append(result, cleanURL)
+		}
+	}
+
+	return result
 }
 
 // buildYTDLPArgs constructs the command-line arguments for yt-dlp based on user flags.
@@ -55,7 +92,7 @@ func buildYTDLPArgs(url, codecPref, destinationPath, cookiesFrom string, socm bo
 		"--no-mtime",
 		"--output", outputTemplate,
 		"--external-downloader", "aria2c",
-		"--external-downloader-args", "-x 16 -s 16 -k 1M",
+		"--external-downloader-args", "-x 16 -s 32 -k 1M --disk-cache=128M --enable-color=false",
 	}
 
 	if cookiesFrom != "" {
@@ -95,6 +132,89 @@ func buildYTDLPArgs(url, codecPref, destinationPath, cookiesFrom string, socm bo
 	return args
 }
 
+// downloadURL executes yt-dlp for a single URL in a goroutine.
+func downloadURL(url, codecPref, destinationPath, cookiesFrom string, socm bool, wg *sync.WaitGroup, sem chan struct{}, failedURLsChan chan<- string) {
+	defer wg.Done()
+	defer func() { <-sem }() // Release semaphore slot.
+
+	fmt.Printf("Starting download: %s\n", url)
+
+	cmdArgs := buildYTDLPArgs(url, codecPref, destinationPath, cookiesFrom, socm)
+	cmd := exec.Command("yt-dlp", cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("Failed to download: %s (exit code: %v)\n", url, err)
+		failedURLsChan <- url
+	} else {
+		fmt.Printf("Completed download: %s\n", url)
+	}
+}
+
+// batchDownload handles downloading multiple URLs concurrently.
+func batchDownload(urls []string, codecPref, destinationPath, cookiesFrom string, socm bool, parallel int) {
+
+	// Sanitize and deduplicate URLs
+	cleanURLs := sanitizeAndDeduplicateURLs(urls)
+	if len(cleanURLs) == 0 {
+		fatalf("no valid URLs provided")
+	}
+
+	if len(cleanURLs) != len(urls) {
+		fmt.Printf("Processing %d valid URLs (filtered from %d)\n", len(cleanURLs), len(urls))
+	}
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, parallel)
+	failedURLsChan := make(chan string, len(cleanURLs))
+	done := make(chan bool, 1)
+
+	// Launch downloads
+	go func() {
+		for _, url := range cleanURLs {
+			wg.Add(1)
+			sem <- struct{}{}
+			go downloadURL(url, codecPref, destinationPath, cookiesFrom, socm, &wg, sem, failedURLsChan)
+		}
+		wg.Wait()
+		done <- true
+	}()
+
+	// Wait for completion or signal
+	select {
+	case <-done:
+		// Downloads completed normally
+	case <-sigChan:
+		fmt.Printf("\nReceived termination signal. Waiting for active downloads to complete...\n")
+		<-done
+	}
+
+	close(failedURLsChan)
+
+	var failedURLs []string
+	for url := range failedURLsChan {
+		failedURLs = append(failedURLs, url)
+	}
+
+	if len(failedURLs) > 0 {
+		fmt.Printf("\n--- Summary ---\n")
+		fmt.Printf("%d/%d downloads failed.\n", len(failedURLs), len(cleanURLs))
+		fmt.Println("Failed URLs:")
+		for _, url := range failedURLs {
+			fmt.Printf("  - %s\n", url)
+		}
+		os.Exit(1)
+	} else {
+		fmt.Printf("\n--- Summary ---\n")
+		fmt.Printf("All %d downloads completed successfully.\n", len(cleanURLs))
+	}
+}
+
 func main() {
 	// Define command-line flags.
 	var (
@@ -102,43 +222,65 @@ func main() {
 		destinationPath string
 		cookiesFrom     string
 		socm            bool
+		parallel        int
 	)
 
 	flag.StringVar(&codecPref, "codec", codecAV1, "Preferred video codec (av1 or vp9). Ignored if -socm is used.")
 	flag.StringVar(&destinationPath, "d", "", "Download destination. Can be a directory or a full file path.")
 	flag.StringVar(&cookiesFrom, "cookies-from", "", "Load cookies from the specified browser (e.g., firefox, chrome).")
 	flag.BoolVar(&socm, "socm", false, "Optimize for social media compatibility (MP4, H.264/AAC).")
+	flag.IntVar(&parallel, "p", 4, "Number of parallel downloads for batch mode.")
 
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
-		fmt.Fprintf(out, "Usage: ytmax [options] URL\n\n")
-		fmt.Fprintf(out, "A wrapper for yt-dlp to download single videos with specific quality and codec preferences.\n\n")
+		fmt.Fprintf(out, "Usage: ytmax [options] URL [URL...]\n\n")
+		fmt.Fprintf(out, "A wrapper for yt-dlp to download single videos or batches with optimized settings.\n")
+		fmt.Fprintf(out, "Automatically detects batch mode when multiple URLs are provided.\n\n")
 		fmt.Fprintf(out, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(out, "\nExamples:\n")
-		fmt.Fprintf(out, "  ytmax -codec vp9 -d /mnt/videos https://youtu.be/VIDEO_ID\n")
-		fmt.Fprintf(out, "  ytmax --cookies-from firefox https://youtu.be/VIDEO_ID\n")
+		fmt.Fprintf(out, "  Single download:\n")
+		fmt.Fprintf(out, "    ytmax -codec vp9 -d /videos https://youtu.be/VIDEO_ID\n")
+		fmt.Fprintf(out, "  Batch download:\n")
+		fmt.Fprintf(out, "    ytmax -d /videos -p 6 \"URL1\" \"URL2\" \"URL3\"\n")
+		fmt.Fprintf(out, "    ytmax --cookies-from firefox \"URL1\" \"URL2\"\n")
 	}
 
 	flag.Parse()
 
-	// Check for URL argument.
+	// Check for URL arguments.
 	if flag.NArg() < 1 {
 		flag.Usage()
 		os.Exit(1)
 	}
-	url := flag.Arg(0)
 
-	// Verify dependencies.
+	if parallel < 1 {
+		fatalf("number of parallel downloads (-p) must be at least 1")
+	}
+
+	// Check dependencies early
 	checkDependencies("yt-dlp", "aria2c")
 
-	// Build and execute the command.
-	cmdArgs := buildYTDLPArgs(url, codecPref, destinationPath, cookiesFrom, socm)
-	cmd := exec.Command("yt-dlp", cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	urls := flag.Args()
 
-	if err := cmd.Run(); err != nil {
-		os.Exit(1)
+	// Detect batch mode vs single download.
+	if len(urls) == 1 {
+		// Single download mode.
+		url := strings.TrimSpace(urls[0])
+		if !validateURL(url) {
+			fatalf("invalid URL provided: %s", url)
+		}
+
+		cmdArgs := buildYTDLPArgs(url, codecPref, destinationPath, cookiesFrom, socm)
+		cmd := exec.Command("yt-dlp", cmdArgs...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			os.Exit(1)
+		}
+	} else {
+		// Batch download mode.
+		batchDownload(urls, codecPref, destinationPath, cookiesFrom, socm, parallel)
 	}
 }
