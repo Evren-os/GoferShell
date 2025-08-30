@@ -35,7 +35,8 @@ const (
 
 // fatalf prints a formatted error message to stderr and exits with status 1.
 func fatalf(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "%sError: "+format+"%s\n", colorRed, colorReset, args...)
+	errorMessage := fmt.Sprintf(format, args...)
+	fmt.Fprintf(os.Stderr, "%sError: %s%s\n", colorRed, errorMessage, colorReset)
 	os.Exit(1)
 }
 
