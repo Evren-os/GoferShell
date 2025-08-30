@@ -15,7 +15,7 @@ const (
 	colorRed    = "\033[31m"
 	colorGreen  = "\033[32m"
 	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
+	colorCyan   = "\033[36m"
 	colorReset  = "\033[0m"
 
 	commandTimeout = 30 * time.Second
@@ -215,21 +215,21 @@ func displayResults(official, aur string) {
 	aurCount := countUpdates(aur)
 
 	if officialCount == 0 && aurCount == 0 {
-		fmt.Printf("%sAll patched. The universe is in balance.%s\n", colorBlue, colorReset)
+		fmt.Printf("%sAll patched. The universe is in balance.%s\n", colorGreen, colorReset)
 		return
 	}
 
 	if officialCount > 0 {
-		fmt.Printf("%sThe mothership is hailing: %d new directives.%s\n", colorGreen, officialCount, colorReset)
+		fmt.Printf("%sThe mothership is hailing: %s%d%s new directives.%s\n", colorGreen, colorCyan, officialCount, colorGreen, colorReset)
 		fmt.Println(official)
 	} else {
-		fmt.Printf("%sMainline is stable. As it should be.%s\n", colorBlue, colorReset)
+		fmt.Printf("%sMainline is stable. As it should be.%s\n", colorGreen, colorReset)
 	}
 
 	if aurCount > 0 {
-		fmt.Printf("%s%d new AUR bounties.%s\n", colorYellow, aurCount, colorReset)
+		fmt.Printf("%s%s%d%s new AUR bounties.%s\n", colorYellow, colorCyan, aurCount, colorYellow, colorReset)
 		fmt.Println(aur)
 	} else {
-		fmt.Printf("%sAUR sleeps. Silence is deadly.%s\n", colorBlue, colorReset)
+		fmt.Printf("%sAUR sleeps. Silence is deadly.%s\n", colorGreen, colorReset)
 	}
 }

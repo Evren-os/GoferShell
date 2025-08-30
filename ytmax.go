@@ -13,6 +13,14 @@ import (
 	"syscall"
 )
 
+const (
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorCyan   = "\033[36m"
+	colorReset  = "\033[0m"
+)
+
 // Constants for yt-dlp arguments and settings.
 const (
 	defaultFilenamePattern = "%(title)s [%(id)s][%(height)sp][%(fps)sfps][%(vcodec)s][%(acodec)s].%(ext)s"
@@ -27,7 +35,7 @@ const (
 
 // fatalf prints a formatted error message to stderr and exits with status 1.
 func fatalf(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "%sError: "+format+"%s\n", colorRed, colorReset, args...)
 	os.Exit(1)
 }
 
@@ -61,7 +69,7 @@ func sanitizeAndDeduplicateURLs(urls []string) []string {
 			continue
 		}
 		if !validateURL(cleanURL) {
-			fmt.Printf("Warning: Skipping invalid URL: %s\n", cleanURL)
+			fmt.Printf("%sWarning: Skipping invalid URL: %s%s\n", colorYellow, cleanURL, colorReset)
 			continue
 		}
 		if !seen[cleanURL] {
@@ -137,7 +145,7 @@ func downloadURL(url, codecPref, destinationPath, cookiesFrom string, socm bool,
 	defer wg.Done()
 	defer func() { <-sem }() // Release semaphore slot.
 
-	fmt.Printf("Starting download: %s\n", url)
+	fmt.Printf("Starting download: %s%s%s\n", colorCyan, url, colorReset)
 
 	cmdArgs := buildYTDLPArgs(url, codecPref, destinationPath, cookiesFrom, socm)
 	cmd := exec.Command("yt-dlp", cmdArgs...)
@@ -145,10 +153,10 @@ func downloadURL(url, codecPref, destinationPath, cookiesFrom string, socm bool,
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("Failed to download: %s (exit code: %v)\n", url, err)
+		fmt.Printf("%sFailed to download: %s (exit code: %v)%s\n", colorRed, url, err, colorReset)
 		failedURLsChan <- url
 	} else {
-		fmt.Printf("Completed download: %s\n", url)
+		fmt.Printf("%sCompleted download: %s%s\n", colorGreen, url, colorReset)
 	}
 }
 
@@ -162,7 +170,7 @@ func batchDownload(urls []string, codecPref, destinationPath, cookiesFrom string
 	}
 
 	if len(cleanURLs) != len(urls) {
-		fmt.Printf("Processing %d valid URLs (filtered from %d)\n", len(cleanURLs), len(urls))
+		fmt.Printf("Processing %s%d%s valid URLs (filtered from %s%d%s)\n", colorCyan, len(cleanURLs), colorReset, colorCyan, len(urls), colorReset)
 	}
 
 	// Setup signal handling for graceful shutdown
@@ -190,7 +198,7 @@ func batchDownload(urls []string, codecPref, destinationPath, cookiesFrom string
 	case <-done:
 		// Downloads completed normally
 	case <-sigChan:
-		fmt.Printf("\nReceived termination signal. Waiting for active downloads to complete...\n")
+		fmt.Printf("\n%sReceived termination signal. Waiting for active downloads to complete...%s\n", colorYellow, colorReset)
 		<-done
 	}
 
@@ -203,15 +211,15 @@ func batchDownload(urls []string, codecPref, destinationPath, cookiesFrom string
 
 	if len(failedURLs) > 0 {
 		fmt.Printf("\n--- Summary ---\n")
-		fmt.Printf("%d/%d downloads failed.\n", len(failedURLs), len(cleanURLs))
+		fmt.Printf("%s%d/%d downloads failed.%s\n", colorRed, len(failedURLs), len(cleanURLs), colorReset)
 		fmt.Println("Failed URLs:")
 		for _, url := range failedURLs {
-			fmt.Printf("  - %s\n", url)
+			fmt.Printf("  - %s%s%s\n", colorRed, url, colorReset)
 		}
 		os.Exit(1)
 	} else {
 		fmt.Printf("\n--- Summary ---\n")
-		fmt.Printf("All %d downloads completed successfully.\n", len(cleanURLs))
+		fmt.Printf("%sAll %d downloads completed successfully.%s\n", colorGreen, len(cleanURLs), colorReset)
 	}
 }
 

@@ -9,7 +9,6 @@ Personal command-line utilities written in Go for my own system management and m
 | `check_updates` | Check for package updates on Arch Linux (official + AUR) | `pacman-contrib`, `paru` or `yay` |
 | `dlfast` | High-performance file downloader using aria2c | `aria2c` |
 | `ytmax` | Download YouTube videos with quality preferences | `yt-dlp`, `aria2c` |
-| `ytstream` | Stream YouTube videos directly in mpv | `yt-dlp`, `mpv` |
 
 ## Installation
 
@@ -39,11 +38,10 @@ go mod init github.com/Evren-os/GoferShell
 go build check_updates.go
 go build dlfast.go
 go build ytmax.go
-go build ytstream.go
 
 # Install to local bin directory
 mkdir -p ~/.local/bin
-cp check_updates dlfast ytmax ytstream ~/.local/bin/
+cp check_updates dlfast ytmax ~/.local/bin/
 chmod +x ~/.local/bin/*
 
 # Add to PATH (add to your shell config)
@@ -115,24 +113,6 @@ ytmax -d ~/Videos -p 6 "URL1" "URL2" "URL3"
 
 # With browser cookies
 ytmax --cookies-from firefox "URL1" "URL2"
-```
-
-### ytstream
-
-Stream YouTube videos directly in mpv player.
-
-```bash
-ytstream [options] <URL>
-```
-
-**Options:**
-- `-max-res <resolution>`: Maximum resolution (default: 2160)
-- `-codec <name>`: Preferred codec (`av1` or `vp9`, default: `av1`)
-- `-cookies-from <browser>`: Use browser cookies
-
-**Example:**
-```bash
-ytstream -max-res 1080 -cookies-from firefox https://youtu.be/VIDEO_ID
 ```
 
 ## Features
